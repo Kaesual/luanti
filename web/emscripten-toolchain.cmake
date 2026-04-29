@@ -125,7 +125,6 @@ set(EMSCRIPTEN_COMMON_FLAGS
     
     # WebGL / Graphics
     "-sFULL_ES3=1"
-    "-sUSE_WEBGL2=1"
     "-sMIN_WEBGL_VERSION=2"
     "-sMAX_WEBGL_VERSION=2"
     

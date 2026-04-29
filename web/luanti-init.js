@@ -111,6 +111,13 @@ function createLuantiModuleConfiguration() {
                     console.log('preRun: Set MINETEST_USER_PATH to:', userDataDir);
                 }
 
+                // Set device pixel ratio in WASM memory so the C++ side
+                // can read it from any thread without cross-thread proxying.
+                if (module._luanti_set_dpr) {
+                    module._luanti_set_dpr(window.devicePixelRatio || 1.0);
+                    console.log('preRun: Set DPR to:', window.devicePixelRatio || 1.0);
+                }
+
                 window.addEventListener('keydown', preventKeyDefault, true);
                 window.addEventListener('keyup', preventKeyDefault, true);
                 window.addEventListener('keypress', preventKeyDefault, true);
@@ -264,6 +271,10 @@ function createLuantiModuleConfiguration() {
                 self._luantiDevicePixelRatio = currentDPR;
                 if (Module) {
                     Module.devicePixelRatio = currentDPR;
+                    // Update DPR in WASM memory for the C++ side
+                    if (Module._luanti_set_dpr) {
+                        Module._luanti_set_dpr(currentDPR);
+                    }
                 }
                 console.log('Updated devicePixelRatio:', currentDPR);
             }

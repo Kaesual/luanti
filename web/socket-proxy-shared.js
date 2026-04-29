@@ -604,7 +604,6 @@ function luantiProxyWritePacket(workerRole, destAddr, destPort, srcAddr, srcPort
  * @param {Uint8Array} destAddressBuffer - Buffer to read destination address into
  * @param {Uint8Array} srcAddressBuffer - Buffer to read source address into
  * @param {number} maxLen - Maximum length of data to read
- * @param {number} readerFamily - Reader address family (AF_INET = 2, AF_INET6 = 10)
  * @param {number} timeoutMs - Timeout in milliseconds
  * @returns {{length: number, srcFamily: number, srcPort: number, destFamily: number, destPort: number} | null} Data read from packet or null if no packet found
  */

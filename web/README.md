@@ -13,7 +13,7 @@ The web build allows Luanti to run directly in modern web browsers without insta
 
 ## Directory Contents
 
-- `Dockerfile` - Docker image with Emscripten 4.0.22 + ninja
+- `Dockerfile` - Docker image with Emscripten 5.0.0 + ninja
 - `Dockerfile.serve` - nginx server for serving the web build
 - `01-build-luanti.sh` - Compiles Luanti to WebAssembly using Docker
 - `02-build-www.sh` - Prepares the final web directory with assets and JS

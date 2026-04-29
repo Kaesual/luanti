@@ -118,26 +118,21 @@ static inline bool is_fake_key(EKEY_CODE key) {
 static int SDLDeviceInstances = 0;
 
 #ifdef _IRR_EMSCRIPTEN_PLATFORM_
-// Get device pixel ratio for high-DPI displays (e.g., Retina)
-// This must work in both main thread and worker thread contexts
-// The DPR is captured on the main thread before workers are created
-EM_JS(double, emscripten_get_device_pixel_ratio, (), {
-	// Workers don't have 'window', but they do have access to Module
-	// which was configured with devicePixelRatio before threading started
-	if (typeof Module !== 'undefined' && Module.devicePixelRatio) {
-		return Module.devicePixelRatio;
+// Device pixel ratio for high-DPI displays (e.g., Retina).
+// Stored in WASM memory (shared across all threads) and set from JavaScript
+// via luanti_set_dpr(). This avoids cross-thread proxying which can cause
+// assertion failures with emscripten_proxy_async.
+static double s_device_pixel_ratio = 1.0;
+
+extern "C" {
+	EMSCRIPTEN_KEEPALIVE void luanti_set_dpr(double dpr) {
+		s_device_pixel_ratio = dpr;
 	}
-	// Fallback to self (works in both window and worker contexts)
-	if (typeof self !== 'undefined' && self._luantiDevicePixelRatio) {
-		return self._luantiDevicePixelRatio;
-	}
-	// Last resort: try window (only works on main thread)
-	if (typeof window !== 'undefined' && window.devicePixelRatio) {
-		return window.devicePixelRatio;
-	}
-	// Default to 1.0 if nothing else works
-	return 1.0;
-});
+}
+
+static double get_device_pixel_ratio() {
+	return s_device_pixel_ratio;
+}
 
 // Get the CSS size (client size) of the canvas, not the backing store size
 // This uses emscripten_run_script_int which runs on the main thread
@@ -742,16 +737,10 @@ bool CIrrDeviceSDL::createWindowWithContext()
 	}
 
 	updateSizeAndScale();
-	if (ScaleX != 1.0f || ScaleY != 1.0f) {
-		// The given window size is in pixels, not in screen coordinates.
-		// We can only do the conversion now since we didn't know the scale before.
-		SDL_SetWindowSize(Window,
-				static_cast<int>(CreationParams.WindowSize.Width / ScaleX),
-				static_cast<int>(CreationParams.WindowSize.Height / ScaleY));
-		// Re-center, otherwise large, non-maximized windows go offscreen.
-		SDL_SetWindowPosition(Window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
-		updateSizeAndScale();
-	}
+	// Note: skip the SDL_SetWindowSize pixel-to-screen-coordinate correction that
+	// the desktop path does. On Emscripten, the canvas CSS size is controlled by
+	// the HTML container; calling SDL_SetWindowSize here would override it with
+	// a size derived from game settings, breaking DPR scaling until the next resize.
 
 	logAttributes();
 
@@ -1387,7 +1376,7 @@ void CIrrDeviceSDL::updateSizeAndScale()
 #ifdef _IRR_EMSCRIPTEN_PLATFORM_
 	// On Emscripten, always get the CSS size and apply DPR manually
 	// SDL doesn't reliably handle DPR with OffscreenCanvas, so we do it ourselves
-	double dpr = emscripten_get_device_pixel_ratio();
+	double dpr = get_device_pixel_ratio();
 	
 	// Get CSS size from canvas element
 	int css_w = 0, css_h = 0;
