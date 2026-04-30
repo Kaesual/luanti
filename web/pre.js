@@ -167,65 +167,48 @@ if (isMainThread) {
         }, 5000);
     }
 
-    // Disable right-click context menu globally for game area
-    // This needs to work in both locked and unlocked pointer modes
-    function preventContextMenu(e) {
-        e.preventDefault();
-        e.stopPropagation();
-        return false;
+    // Canvas is recreated on every game launch (see GameContext.runLuanti),
+    // so all canvas-related event handling must look the element up at event
+    // time rather than capturing it once. Listeners live on window/document
+    // and check the current #canvas dynamically.
+    function getCurrentCanvas() {
+        return document.getElementById('canvas');
     }
-    
-    function attachContextMenuPrevention() {
-        var canvas = document.getElementById('canvas');
-        if (canvas) {
-            // Prevent context menu on canvas (capture phase to catch it early)
-            canvas.addEventListener('contextmenu', preventContextMenu, true);
-            
-            // Also prevent on mousedown for right button (extra safety)
-            canvas.addEventListener('mousedown', function(e) {
-                if (e.button === 2) { // Right mouse button
-                    e.preventDefault();
-                }
-            }, true);
-            
-            // Prevent page scrolling when using scroll wheel over the canvas
-            // Using window-level capture to catch events in all pointer lock states:
-            // - When pointer is locked: events go to window, not canvas
-            // - When not locked: events go to canvas (e.target === canvas)
-            // IMPORTANT: { passive: false } is required to allow preventDefault()
-            window.addEventListener('wheel', function(e) {
-                if (document.pointerLockElement === canvas || e.target === canvas) {
-                    e.preventDefault();
-                }
-            }, { passive: false, capture: true });
-            
-            // Monitor pointer lock changes to ensure context menu stays disabled
-            document.addEventListener('pointerlockchange', function() {
-                console.log('Pointer lock changed. Locked:', !!document.pointerLockElement);
-            });
 
-            console.log('Right-click context menu prevention attached to canvas');
-            return true;
+    // Right-click prevention: delegate from window so we don't need to
+    // re-attach when the canvas element is replaced.
+    window.addEventListener('contextmenu', function(e) {
+        var canvas = getCurrentCanvas();
+        if (canvas && (e.target === canvas || e.composedPath().indexOf(canvas) !== -1)) {
+            e.preventDefault();
+            e.stopPropagation();
         }
-        return false;
-    }
-    
-    // Try to attach immediately
-    if (!attachContextMenuPrevention()) {
-        // If canvas doesn't exist yet, wait for DOMContentLoaded
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', attachContextMenuPrevention);
-        } else {
-            // DOM already loaded, try polling a few times
-            var attempts = 0;
-            var pollInterval = setInterval(function() {
-                attempts++;
-                if (attachContextMenuPrevention() || attempts > 100) {
-                    clearInterval(pollInterval);
-                }
-            }, 100);
+    }, true);
+
+    window.addEventListener('mousedown', function(e) {
+        if (e.button !== 2) return;
+        var canvas = getCurrentCanvas();
+        if (canvas && e.target === canvas) {
+            e.preventDefault();
         }
-    }
+    }, true);
+
+    // Prevent page scrolling when the wheel is used over the canvas or
+    // while pointer is locked. SDL's own canvas listener handles the
+    // event for the game; we just stop the browser's default scroll.
+    window.addEventListener('wheel', function(e) {
+        var canvas = getCurrentCanvas();
+        if (!canvas) return;
+        if (document.pointerLockElement === canvas || e.target === canvas) {
+            e.preventDefault();
+        }
+    }, { passive: false, capture: true });
+
+    document.addEventListener('pointerlockchange', function() {
+        console.log('Pointer lock changed. Locked:', !!document.pointerLockElement);
+    });
+
+    console.log('Canvas event delegation (contextmenu/mousedown/wheel) installed on window');
 
     // Mobile/touch detection
     var isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);

@@ -957,6 +957,11 @@ bool CIrrDeviceSDL::run()
 			irrevent.MouseInput.Event = EMIE_MOUSE_WHEEL;
 #ifdef _IRR_USE_SDL3_
 			irrevent.MouseInput.Wheel = SDL_event.wheel.y;
+#elif defined(__EMSCRIPTEN__)
+			// Emscripten's SDL2 port writes wheel.y but never wheel.preciseY,
+			// leaving preciseY as uninitialized memory (it shares the union
+			// with motion.yrel). Use the integer field instead.
+			irrevent.MouseInput.Wheel = SDL_event.wheel.y;
 #elif SDL_VERSION_ATLEAST(2, 0, 18)
 			irrevent.MouseInput.Wheel = SDL_event.wheel.preciseY;
 #else
