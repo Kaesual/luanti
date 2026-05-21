@@ -10,18 +10,19 @@
 namespace video
 {
 
-class OpenGLVBO
+class OGLBufferObject
 {
 public:
-#ifdef __EMSCRIPTEN__
-	/// @param target GL buffer target (GL_ARRAY_BUFFER or GL_ELEMENT_ARRAY_BUFFER)
-	OpenGLVBO(GLenum target = GL_ARRAY_BUFFER) : m_target(target) {}
-#else
+	enum Target : GLenum {
+		TARGET_VBO = GL_ARRAY_BUFFER,
+		TARGET_IBO = GL_ELEMENT_ARRAY_BUFFER,
+		TARGET_UBO = GL_UNIFORM_BUFFER,
+	};
+
 	/// @note does not create on GL side
-	OpenGLVBO() = default;
-#endif
+	OGLBufferObject(Target target) : m_target(target) {}
 	/// @note does not free on GL side
-	~OpenGLVBO() = default;
+	~OGLBufferObject() = default;
 
 	/// @return "name" (ID) of this buffer in GL
 	GLuint getName() const { return m_name; }
@@ -57,11 +58,10 @@ public:
 	void destroy();
 
 private:
+
 	GLuint m_name = 0;
 	size_t m_size = 0;
-#ifdef __EMSCRIPTEN__
-	GLenum m_target = GL_ARRAY_BUFFER;  // WebGL-safe: separate buffers for vertices vs indices
-#endif
+	Target m_target;
 };
 
 }

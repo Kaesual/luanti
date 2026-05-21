@@ -160,8 +160,17 @@ std::string Address::serializeString() const
 	}
 	return "0.0.0.0";
 #else
+	const void *src = nullptr;
+	switch (m_addr_family) {
+		case AF_INET:  src = &m_address.ipv4; break;
+		case AF_INET6: src = &m_address.ipv6; break;
+	}
+
+	if (!src)
+		return "<unhandled-addr-family>";
+
 	char str[INET6_ADDRSTRLEN];
-	if (inet_ntop(m_addr_family, (void*) &m_address, str, sizeof(str)) == nullptr)
+	if (inet_ntop(m_addr_family, src, str, sizeof(str)) == nullptr)
 		return "";
 	return str;
 #endif

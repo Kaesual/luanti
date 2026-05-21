@@ -345,7 +345,7 @@ int ObjectRef::l_get_wielded_item(lua_State *L)
 	return 1;
 }
 
-// set_wielded_item(self, item)
+// set_wielded_item(self, item, skip_anim)
 int ObjectRef::l_set_wielded_item(lua_State *L)
 {
 	NO_MAP_LOCK_REQUIRED;
@@ -355,10 +355,13 @@ int ObjectRef::l_set_wielded_item(lua_State *L)
 		return 0;
 
 	ItemStack item = read_item(L, 2, getServer(L)->idef());
-
 	bool success = sao->setWieldedItem(item);
+
 	if (success && sao->getType() == ACTIVEOBJECT_TYPE_PLAYER) {
-		getServer(L)->SendInventory(((PlayerSAO *)sao)->getPlayer(), true);
+		bool skip_anim = readParam<bool>(L, 3, false);
+		RemotePlayer *player = dynamic_cast<PlayerSAO*>(sao)->getPlayer();
+
+		getServer(L)->SendInventory(player, true, skip_anim);
 	}
 	lua_pushboolean(L, success);
 	return 1;
@@ -533,12 +536,16 @@ int ObjectRef::l_set_camera(lua_State *L)
 	if (player == nullptr)
 		return 0;
 
-	luaL_checktype(L, 2, LUA_TTABLE);
+	if (lua_isnoneornil(L, 2)) {
+		player->allowed_camera_mode = CAMERA_MODE_ANY;
+	} else {
+		luaL_checktype(L, 2, LUA_TTABLE);
 
-	lua_getfield(L, -1, "mode");
-	if (lua_isstring(L, -1))
-		string_to_enum(es_CameraMode, player->allowed_camera_mode, lua_tostring(L, -1));
-	lua_pop(L, 1);
+		lua_getfield(L, -1, "mode");
+		if (lua_isstring(L, -1))
+			string_to_enum(es_CameraMode, player->allowed_camera_mode, lua_tostring(L, -1));
+		lua_pop(L, 1);
+	}
 
 	getServer(L)->SendCamera(player->getPeerId(), player);
 	return 0;
@@ -2097,7 +2104,7 @@ int ObjectRef::l_set_sky(lua_State *L)
 		if (sky_params.textures.size() != 6 && !sky_params.textures.empty())
 			throw LuaError("Skybox expects 6 textures!");
 
-		sky_params.clouds = getboolfield_default(L, 2, "clouds", sky_params.clouds);
+		getboolfield(L, 2, "clouds", sky_params.clouds);
 
 		lua_getfield(L, 2, "sky_color");
 		if (lua_istable(L, -1)) {
@@ -2159,6 +2166,8 @@ int ObjectRef::l_set_sky(lua_State *L)
 			lua_pop(L, 1);
 		}
 		lua_pop(L, 1);
+
+		getboolfield(L, 2, "auto_dim_skybox", sky_params.auto_dim_skybox);
 	} else {
 		// Handle old set_sky calls, and log deprecated:
 		log_deprecated(L, "Deprecated call to set_sky, please check lua_api.md");
@@ -2288,6 +2297,9 @@ int ObjectRef::l_get_sky(lua_State *L)
 	lua_setfield(L, -2, "textures");
 	lua_pushboolean(L, skybox_params.clouds);
 	lua_setfield(L, -2, "clouds");
+
+	lua_pushboolean(L, skybox_params.auto_dim_skybox);
+	lua_setfield(L, -2, "auto_dim_skybox");
 
 	push_sky_color(L, skybox_params);
 	lua_setfield(L, -2, "sky_color");
@@ -2686,6 +2698,10 @@ int ObjectRef::l_set_lighting(lua_State *L)
 			lua_getfield(L, -1, "tint");
 			read_color(L, -1, &lighting.shadow_tint);
 			lua_pop(L, 1); // tint
+			lua_getfield(L, -1, "direction");
+			if (!lua_isnil(L, -1))
+				lighting.shadow_direction = check_v3f(L, -1);
+			lua_pop(L, 1); // direction
 		}
 		lua_pop(L, 1); // shadows
 
@@ -2739,6 +2755,8 @@ int ObjectRef::l_get_lighting(lua_State *L)
 	lua_setfield(L, -2, "intensity");
 	push_ARGB8(L, lighting.shadow_tint);
 	lua_setfield(L, -2, "tint");
+	push_v3f(L, lighting.shadow_direction);
+	lua_setfield(L, -2, "direction");
 	lua_setfield(L, -2, "shadows");
 	lua_pushnumber(L, lighting.saturation);
 	lua_setfield(L, -2, "saturation");

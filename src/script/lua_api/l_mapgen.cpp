@@ -81,8 +81,6 @@ ObjDef *get_objdef(lua_State *L, int index, const ObjDefManager *objmgr);
 Biome *get_or_load_biome(lua_State *L, int index,
 	BiomeManager *biomemgr);
 Biome *read_biome_def(lua_State *L, int index, const NodeDefManager *ndef);
-size_t get_biome_list(lua_State *L, int index,
-	BiomeManager *biomemgr, std::unordered_set<biome_t> *biome_id_list);
 
 Schematic *get_or_load_schematic(lua_State *L, int index,
 	SchematicManager *schemmgr, StringMap *replace_names);
@@ -408,8 +406,8 @@ Biome *read_biome_def(lua_State *L, int index, const NodeDefManager *ndef)
 }
 
 
-size_t get_biome_list(lua_State *L, int index,
-	BiomeManager *biomemgr, std::unordered_set<biome_t> *biome_id_list)
+static size_t get_biome_list(lua_State *L, int index,
+	BiomeManager *biomemgr, std::unordered_set<biome_t> *biome_ids)
 {
 	if (index < 0)
 		index = lua_gettop(L) + 1 + index;
@@ -433,7 +431,7 @@ size_t get_biome_list(lua_State *L, int index,
 			return 1;
 		}
 
-		biome_id_list->insert(biome->index);
+		biome_ids->insert(biome->index);
 		return 0;
 	}
 
@@ -450,7 +448,7 @@ size_t get_biome_list(lua_State *L, int index,
 			continue;
 		}
 
-		biome_id_list->insert(biome->index);
+		biome_ids->insert(biome->index);
 	}
 
 	return fail_count;

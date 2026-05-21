@@ -6,13 +6,13 @@
 
 #pragma once
 
+#include "HWBuffer.h"
 #include "SIrrCreationParameters.h"
 #include "Common.h"
-#include "VBO.h"
+#include "BufferObject.h"
 #include "CNullDriver.h"
 #include "IMaterialRendererServices.h"
 #include "EDriverFeatures.h"
-#include "fast_atof.h"
 #include "ExtensionHandler.h"
 #include "IContextManager.h"
 
@@ -45,29 +45,23 @@ public:
 	struct SHWBufferLink_opengl : public SHWBufferLink
 	{
 #ifdef __EMSCRIPTEN__
-		// WebGL-safe: Initialize VBO with correct target for vertex data
-		SHWBufferLink_opengl(const scene::IVertexBuffer *vb) 
-			: SHWBufferLink(vb), Vbo(GL_ARRAY_BUFFER) {}
-		SHWBufferLink_opengl(const scene::IIndexBuffer *ib) 
-			: SHWBufferLink(ib), Vbo(GL_ELEMENT_ARRAY_BUFFER) {}
+		// WebGL2 forbids reusing a buffer across array/element targets, so pick the
+		// matching target up front based on what this buffer holds.
+		SHWBufferLink_opengl(const scene::HWBuffer *buf) : SHWBufferLink(buf),
+			Vbo(buf->getBufferType() == scene::HWBuffer::Type::INDEX ? OGLBufferObject::TARGET_IBO : OGLBufferObject::TARGET_VBO) {}
 #else
-		SHWBufferLink_opengl(const scene::IVertexBuffer *vb) : SHWBufferLink(vb) {}
-		SHWBufferLink_opengl(const scene::IIndexBuffer *ib) : SHWBufferLink(ib) {}
+		SHWBufferLink_opengl(const scene::HWBuffer *buf) : SHWBufferLink(buf), Vbo(OGLBufferObject::TARGET_VBO) {}
 #endif
-		OpenGLVBO Vbo;
+
+		OGLBufferObject Vbo;
 	};
 
-	bool updateVertexHardwareBuffer(SHWBufferLink_opengl *HWBuffer);
-	bool updateIndexHardwareBuffer(SHWBufferLink_opengl *HWBuffer);
+	bool _updateHardwareBuffer(SHWBufferLink_opengl *HWBuffer);
 
 	//! updates hardware buffer if needed
 	bool updateHardwareBuffer(SHWBufferLink *HWBuffer) override;
 
-	//! Create hardware buffer from vertex buffer
-	SHWBufferLink *createHardwareBuffer(const scene::IVertexBuffer *vb) override;
-
-	//! Create hardware buffer from index buffer
-	SHWBufferLink *createHardwareBuffer(const scene::IIndexBuffer *ib) override;
+	SHWBufferLink *createHardwareBuffer(const scene::HWBuffer *buf) override;
 
 	//! Delete hardware buffer (only some drivers can)
 	void deleteHardwareBuffer(SHWBufferLink *HWBuffer) override;
@@ -291,7 +285,7 @@ protected:
 		LockRenderStateMode = false;
 	}
 
-	bool uploadHardwareBuffer(OpenGLVBO &vbo, const void *buffer, size_t bufferSize, scene::E_HARDWARE_MAPPING hint);
+	bool uploadHardwareBuffer(OGLBufferObject &vbo, const void *buffer, size_t bufferSize, scene::E_HARDWARE_MAPPING hint);
 
 	void createMaterialRenderers();
 
@@ -302,10 +296,15 @@ protected:
 	//! Same as `CacheHandler->setViewport`, but also sets `ViewPort`
 	virtual void setViewPortRaw(u32 width, u32 height);
 
+	virtual u16 getMaxJointTransforms() const override
+	{
+		return MaxJointTransforms;
+	}
+	virtual void setJointTransforms(const std::vector<core::matrix4> &jointMatrices) override;
+
 	void drawQuad(const VertexType &vertexType, const S3DVertex (&vertices)[4]);
 	void drawArrays(GLenum primitiveType, const VertexType &vertexType, const void *vertices, int vertexCount);
 	void drawElements(GLenum primitiveType, const VertexType &vertexType, const void *vertices, int vertexCount, const u16 *indices, int indexCount);
-	void drawElements(GLenum primitiveType, const VertexType &vertexType, uintptr_t vertices, uintptr_t indices, int indexCount);
 
 #ifdef __EMSCRIPTEN__
 	void drawGeneric(const void *vertices, u32 vertexCount, const void *indexList, u32 primitiveCount,
@@ -366,15 +365,20 @@ private:
 	bool EnableErrorTest;
 
 #ifdef __EMSCRIPTEN__
-	// WebGL-safe: QuadIndexVBO is used for index data, must use GL_ELEMENT_ARRAY_BUFFER
-	OpenGLVBO QuadIndexVBO{GL_ELEMENT_ARRAY_BUFFER};
-	// WebGL-safe: Persistent VBOs for client-side arrays to avoid GenBuffers/DeleteBuffers churn
-	OpenGLVBO DynamicVertexVBO{GL_ARRAY_BUFFER};
-	OpenGLVBO DynamicIndexVBO{GL_ELEMENT_ARRAY_BUFFER};
+	// WebGL2 forbids reusing a buffer across array/element targets, so QuadIndexVBO
+	// must be created with the element-array target. DynamicVertexVBO/DynamicIndexVBO
+	// hold streamed client-side data that WebGL2 requires to live in real buffer objects.
+	OGLBufferObject QuadIndexVBO = OGLBufferObject(OGLBufferObject::TARGET_IBO);
+	OGLBufferObject DynamicVertexVBO = OGLBufferObject(OGLBufferObject::TARGET_VBO);
+	OGLBufferObject DynamicIndexVBO = OGLBufferObject(OGLBufferObject::TARGET_IBO);
 #else
-	OpenGLVBO QuadIndexVBO;
+	OGLBufferObject QuadIndexVBO = OGLBufferObject(OGLBufferObject::TARGET_VBO);
 #endif
 	void initQuadsIndices(u32 max_vertex_count = 65536);
+
+	u16 MaxJointTransforms = 0;
+	void initMaxJointTransforms();
+	OGLBufferObject JointTransformsUBO = OGLBufferObject(OGLBufferObject::TARGET_UBO);
 
 	void debugCb(GLenum source, GLenum type, GLuint id, GLenum severity, GLsizei length, const GLchar *message);
 	static void APIENTRY debugCb(GLenum source, GLenum type, GLuint id, GLenum severity, GLsizei length, const GLchar *message, const void *userParam);
