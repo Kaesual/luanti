@@ -4,6 +4,7 @@
 
 #include "httpfetch.h"
 #include "porting.h" // for sleep_ms(), get_sysinfo(), secure_rand_fill_buf()
+#include <cstring>
 #include <list>
 #include <unordered_map>
 #include <mutex>
@@ -754,6 +755,261 @@ void httpfetch_async(const HTTPFetchRequest &fetch_request)
 static void httpfetch_request_clear(u64 caller)
 {
 	g_httpfetch_thread->requestClear(caller, nullptr);
+}
+
+bool httpfetch_sync_interruptible(const HTTPFetchRequest &fetch_request,
+		HTTPFetchResult &fetch_result, long interval)
+{
+	if (const Thread *thread = Thread::getCurrentThread()) {
+		HTTPFetchRequest req = fetch_request;
+		req.caller = httpfetch_caller_alloc_secure();
+		httpfetch_async(req);
+		do {
+			if (thread->stopRequested()) {
+				httpfetch_caller_free(req.caller);
+				fetch_result = HTTPFetchResult(fetch_request);
+				return false;
+			}
+			sleep_ms(interval);
+		} while (!httpfetch_async_get(req.caller, fetch_result));
+		httpfetch_caller_free(req.caller);
+	} else {
+		throw ModError(std::string("You have tried to execute a synchronous HTTP request on the main thread! "
+				"This offense shall be punished. (").append(fetch_request.url).append(")"));
+	}
+	return true;
+}
+
+#elif defined(__EMSCRIPTEN__)
+
+#include <emscripten/fetch.h>
+
+/*
+	WebAssembly/Emscripten httpfetch backend.
+
+	Uses emscripten_fetch (which is backed by the browser's fetch API) instead
+	of cURL. The browser performs the actual request, including TLS, redirects
+	and connection pooling, and delivers the result via the success/error
+	callbacks. We translate that back into the existing result queue so the
+	rest of the engine (sync polling loop, Lua API, GUIEngine::downloadFile)
+	keeps working unchanged.
+*/
+
+struct EmFetchContext {
+	HTTPFetchRequest request;
+	HTTPFetchResult result;
+	// Storage for header strings; header_ptrs holds pointers into these.
+	std::vector<std::string> header_storage;
+	std::vector<const char*> header_ptrs;
+	// POST/PUT body; must outlive the in-flight fetch.
+	std::string body;
+
+	EmFetchContext(const HTTPFetchRequest &req) :
+		request(req), result(req) {}
+};
+
+// Track ongoing fetches per caller so httpfetch_caller_free() can abort them.
+static std::mutex g_em_ongoing_mutex;
+static std::unordered_multimap<u64, emscripten_fetch_t*> g_em_ongoing;
+
+static void em_register_ongoing(u64 caller, emscripten_fetch_t *fetch)
+{
+	if (caller == HTTPFETCH_DISCARD)
+		return;
+	MutexAutoLock lock(g_em_ongoing_mutex);
+	g_em_ongoing.emplace(caller, fetch);
+}
+
+static void em_unregister_ongoing(u64 caller, emscripten_fetch_t *fetch)
+{
+	if (caller == HTTPFETCH_DISCARD)
+		return;
+	MutexAutoLock lock(g_em_ongoing_mutex);
+	auto range = g_em_ongoing.equal_range(caller);
+	for (auto it = range.first; it != range.second; ++it) {
+		if (it->second == fetch) {
+			g_em_ongoing.erase(it);
+			return;
+		}
+	}
+}
+
+static void em_finish_fetch(emscripten_fetch_t *fetch, bool success)
+{
+	auto *ctx = static_cast<EmFetchContext*>(fetch->userData);
+	ctx->result.succeeded = success && fetch->status < 400;
+	ctx->result.response_code = fetch->status;
+	if (success && fetch->numBytes > 0)
+		ctx->result.data.assign(fetch->data, fetch->numBytes);
+
+	if (!ctx->request.quiet) {
+		if (!success) {
+			errorstream << "HTTPFetch for " << ctx->request.url
+				<< " failed: status=" << fetch->status;
+			if (fetch->statusText[0])
+				errorstream << " (" << fetch->statusText << ")";
+			errorstream << std::endl;
+		} else if (fetch->status >= 400) {
+			errorstream << "HTTPFetch for " << ctx->request.url
+				<< " returned response code " << fetch->status << std::endl;
+			if (ctx->result.caller == HTTPFETCH_PRINT_BODY
+					&& !ctx->result.data.empty()) {
+				errorstream << "Response body:" << std::endl;
+				safe_print_string(errorstream, ctx->result.data);
+				errorstream << std::endl;
+			}
+		}
+	}
+
+	httpfetch_deliver_result(ctx->result);
+	em_unregister_ongoing(ctx->request.caller, fetch);
+	delete ctx;
+	emscripten_fetch_close(fetch);
+}
+
+static void em_on_success(emscripten_fetch_t *fetch) { em_finish_fetch(fetch, true); }
+static void em_on_error(emscripten_fetch_t *fetch) { em_finish_fetch(fetch, false); }
+
+static const char *em_method_string(HttpMethod m)
+{
+	switch (m) {
+	case HTTP_GET:    return "GET";
+	case HTTP_HEAD:   return "HEAD";
+	case HTTP_POST:   return "POST";
+	case HTTP_PUT:    return "PUT";
+	case HTTP_PATCH:  return "PATCH";
+	case HTTP_DELETE: return "DELETE";
+	}
+	return "GET";
+}
+
+void httpfetch_init(int parallel_limit)
+{
+	// emscripten_fetch is always available when linked with -sFETCH=1.
+}
+
+void httpfetch_cleanup()
+{
+	std::vector<emscripten_fetch_t*> to_close;
+	{
+		MutexAutoLock lock(g_em_ongoing_mutex);
+		for (auto &kv : g_em_ongoing)
+			to_close.push_back(kv.second);
+		g_em_ongoing.clear();
+	}
+	for (auto *f : to_close)
+		emscripten_fetch_close(f);
+}
+
+void httpfetch_async(const HTTPFetchRequest &fetch_request)
+{
+	auto *ctx = new EmFetchContext(fetch_request);
+
+	emscripten_fetch_attr_t attr;
+	emscripten_fetch_attr_init(&attr);
+	std::strncpy(attr.requestMethod, em_method_string(fetch_request.method),
+		sizeof(attr.requestMethod) - 1);
+	attr.attributes = EMSCRIPTEN_FETCH_LOAD_TO_MEMORY;
+	attr.userData = ctx;
+	attr.onsuccess = em_on_success;
+	attr.onerror = em_on_error;
+	if (fetch_request.timeout > 0)
+		attr.timeoutMSecs = fetch_request.timeout;
+
+	const bool has_request_body = fetch_request.method != HTTP_GET
+		&& fetch_request.method != HTTP_HEAD;
+	bool body_is_form = false;
+	if (has_request_body) {
+		if (!fetch_request.fields.empty()) {
+			// multipart/form-data is not supported on this backend; we
+			// always send fields as application/x-www-form-urlencoded.
+			for (auto &field : fetch_request.fields) {
+				if (!ctx->body.empty())
+					ctx->body += "&";
+				ctx->body += urlencode(field.first);
+				ctx->body += "=";
+				ctx->body += urlencode(field.second);
+			}
+			body_is_form = true;
+		} else {
+			ctx->body = fetch_request.raw_data;
+		}
+		attr.requestData = ctx->body.data();
+		attr.requestDataSize = ctx->body.size();
+	}
+
+	// Build header pointer array. Alternating key/value strings, terminated
+	// by a nullptr. Strings must outlive the in-flight fetch (they live in
+	// ctx->header_storage).
+	if (body_is_form) {
+		ctx->header_storage.emplace_back("Content-Type");
+		ctx->header_storage.emplace_back("application/x-www-form-urlencoded");
+	}
+	for (const auto &h : fetch_request.extra_headers) {
+		auto colon = h.find(':');
+		if (colon == std::string::npos)
+			continue;
+		std::string value = h.substr(colon + 1);
+		size_t start = value.find_first_not_of(" \t");
+		value = (start == std::string::npos) ? std::string() : value.substr(start);
+		ctx->header_storage.push_back(h.substr(0, colon));
+		ctx->header_storage.push_back(std::move(value));
+	}
+	if (!ctx->header_storage.empty()) {
+		ctx->header_ptrs.reserve(ctx->header_storage.size() + 1);
+		for (auto &s : ctx->header_storage)
+			ctx->header_ptrs.push_back(s.c_str());
+		ctx->header_ptrs.push_back(nullptr);
+		attr.requestHeaders = ctx->header_ptrs.data();
+	}
+
+	// CORS workaround: emscripten_fetch backs onto XMLHttpRequest (created
+	// in the calling pthread's worker scope, so JS-side monkey patches don't
+	// reach it). If the embedder configured `contentdb_url` to point at a
+	// proxy, we rewrite any absolute URL that still points at the canonical
+	// ContentDB host so absolute URLs returned in API responses (thumbnails,
+	// screenshots, etc.) also go through the same-origin proxy.
+	std::string final_url = fetch_request.url;
+	{
+		static const std::string upstream = "https://content.luanti.org";
+		std::string configured = g_settings->get("contentdb_url");
+		while (!configured.empty() && configured.back() == '/')
+			configured.pop_back();
+		if (!configured.empty() && configured != upstream
+				&& final_url.size() >= upstream.size()
+				&& final_url.compare(0, upstream.size(), upstream) == 0) {
+			final_url = configured + final_url.substr(upstream.size());
+		}
+	}
+
+	emscripten_fetch_t *fetch = emscripten_fetch(&attr, final_url.c_str());
+	if (!fetch) {
+		if (!fetch_request.quiet) {
+			errorstream << "HTTPFetch for " << fetch_request.url
+				<< " failed: emscripten_fetch returned null" << std::endl;
+		}
+		httpfetch_deliver_result(ctx->result);
+		delete ctx;
+		return;
+	}
+	em_register_ongoing(fetch_request.caller, fetch);
+}
+
+static void httpfetch_request_clear(u64 caller)
+{
+	std::vector<emscripten_fetch_t*> to_close;
+	{
+		MutexAutoLock lock(g_em_ongoing_mutex);
+		auto range = g_em_ongoing.equal_range(caller);
+		for (auto it = range.first; it != range.second; ++it)
+			to_close.push_back(it->second);
+		g_em_ongoing.erase(range.first, range.second);
+	}
+	// Closing an in-flight fetch suppresses its callbacks, so the attached
+	// EmFetchContext leaks. Cancellation is rare and the contexts are tiny;
+	// accept the trade-off rather than racing the callbacks.
+	for (auto *f : to_close)
+		emscripten_fetch_close(f);
 }
 
 bool httpfetch_sync_interruptible(const HTTPFetchRequest &fetch_request,

@@ -640,7 +640,7 @@ bool GUIEngine::setTexture(texture_layer layer, const std::string &texturepath,
 /******************************************************************************/
 bool GUIEngine::downloadFile(const std::string &url, const std::string &target)
 {
-#if USE_CURL
+#if USE_HTTPFETCH
 	auto target_file = open_ofstream(target.c_str(), true);
 	if (!target_file.good())
 		return false;

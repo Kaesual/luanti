@@ -81,7 +81,20 @@ else()
 	mark_as_advanced(CLEAR CURL_LIBRARY CURL_INCLUDE_DIR)
 endif()
 
-if(NOT USE_CURL)
+# USE_HTTPFETCH is TRUE whenever httpfetch.cpp can actually perform requests.
+# With cURL, that's the curl backend. On Emscripten/WebAssembly builds we use
+# emscripten_fetch instead (browser fetch under the hood), so the HTTP-using
+# Lua APIs (ContentDB, server list, update checker, mod HTTP API) work even
+# when cURL is disabled.
+set(USE_HTTPFETCH FALSE)
+if(USE_CURL)
+	set(USE_HTTPFETCH TRUE)
+elseif(EMSCRIPTEN)
+	message(STATUS "HTTP fetch enabled via emscripten_fetch (no cURL).")
+	set(USE_HTTPFETCH TRUE)
+endif()
+
+if(NOT USE_HTTPFETCH)
 	if(BUILD_CLIENT)
 		message(WARNING "cURL is required to use the server list, content browser or update checker")
 	endif()

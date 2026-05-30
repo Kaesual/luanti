@@ -12,7 +12,7 @@ struct HTTPFetchResult;
 
 class ModApiHttp : public ModApiBase {
 private:
-#if USE_CURL
+#if USE_HTTPFETCH
 	// Helpers for HTTP fetch functions
 	static void read_http_fetch_request(lua_State *L, HTTPFetchRequest &req);
 	static void push_http_fetch_result(lua_State *L, HTTPFetchResult &res, bool completed = true);

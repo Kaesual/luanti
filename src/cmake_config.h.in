@@ -19,6 +19,7 @@
 #cmakedefine01 ENABLE_UPDATE_CHECKER
 #cmakedefine01 USE_GETTEXT
 #cmakedefine01 USE_CURL
+#cmakedefine01 USE_HTTPFETCH
 #cmakedefine01 USE_SOUND
 #cmakedefine01 USE_CURSES
 #cmakedefine01 USE_LEVELDB

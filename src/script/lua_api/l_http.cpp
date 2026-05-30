@@ -26,7 +26,7 @@ const static EnumString es_HttpMethod[] = {
 	{0, nullptr}
 };
 
-#if USE_CURL
+#if USE_HTTPFETCH
 void ModApiHttp::read_http_fetch_request(lua_State *L, HTTPFetchRequest &req)
 {
 	luaL_checktype(L, 1, LUA_TTABLE);
@@ -190,7 +190,7 @@ int ModApiHttp::l_set_http_api_lua(lua_State *L)
 {
 	NO_MAP_LOCK_REQUIRED;
 
-#if USE_CURL
+#if USE_HTTPFETCH
 	// This is called by builtin to give us a function that will later
 	// populate the http_api table with additional method(s).
 	// We need this because access to the HTTP api is security-relevant and
@@ -204,7 +204,7 @@ int ModApiHttp::l_set_http_api_lua(lua_State *L)
 
 void ModApiHttp::Initialize(lua_State *L, int top)
 {
-#if USE_CURL
+#if USE_HTTPFETCH
 
 	bool isMainmenu = false;
 #if CHECK_CLIENT_BUILD()
@@ -228,7 +228,7 @@ void ModApiHttp::Initialize(lua_State *L, int top)
 
 void ModApiHttp::InitializeAsync(lua_State *L, int top)
 {
-#if USE_CURL
+#if USE_HTTPFETCH
 	API_FCT(get_http_api);
 #endif
 }
