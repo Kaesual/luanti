@@ -701,6 +701,19 @@ void initializePaths()
 		path_share = execpath;
 		path_user  = execpath;
 	}
+
+	// On platforms like Emscripten/web there's no useful executable path and
+	// "share" and "user" data live on different filesystems (read-only bundled
+	// assets vs OPFS-backed persistent storage). Allow env-var overrides so
+	// the host can split them.
+	if (const char *share_env = getenv("LUANTI_SHARE_PATH");
+			share_env && *share_env) {
+		path_share = share_env;
+	}
+	if (auto user_env = getUserPathEnvVar()) {
+		path_user = std::move(user_env.value());
+	}
+
 	path_cache = path_user + DIR_DELIM "cache";
 
 #else

@@ -105,10 +105,18 @@ function createLuantiModuleConfiguration() {
                 const module = mod || this || Module;
                 const userDataDir = '/userdata';
                 
-                // Set environment variable (safe to do in preRun)
+                // Set environment variables (safe to do in preRun).
+                // User data lives at /userdata/luanti (under /userdata which is
+                // OPFS-mounted in main()). The /luanti subdir lets future games
+                // live alongside without filename collisions. Read-only bundled
+                // assets are preloaded to /share — splitting share-from-user is
+                // required for the OPFS mount to succeed (see emscripten-toolchain.cmake).
+                const luantiUserPath = userDataDir + '/luanti';
                 if (module.ENV) {
-                    module.ENV.MINETEST_USER_PATH = userDataDir;
-                    console.log('preRun: Set MINETEST_USER_PATH to:', userDataDir);
+                    module.ENV.LUANTI_USER_PATH = luantiUserPath;
+                    module.ENV.LUANTI_SHARE_PATH = '/share';
+                    console.log('preRun: Set LUANTI_USER_PATH to:', luantiUserPath);
+                    console.log('preRun: Set LUANTI_SHARE_PATH to: /share');
                 }
 
                 // Set device pixel ratio in WASM memory so the C++ side
@@ -149,77 +157,16 @@ function createLuantiModuleConfiguration() {
         onRuntimeInitialized: function() {
             Module.printErr('***** RUNTIME INITIALIZED *****');
             console.error('***** RUNTIME INITIALIZED *****');
-            
-            Module.printErr('Canvas element exists: ' + !!document.getElementById('canvas'));
-            Module.printErr('Creating virtual filesystem directories...');
-            Module.printErr('this.FS available: ' + !!this.FS);
-            Module.printErr('Module.FS available: ' + !!Module.FS);
-            
-            // IMPORTANT: With MODULARIZE=1, FS is on 'this' (the Module instance)
-            const FS = this.FS || Module.FS;
-            
-            if (!FS) {
-                Module.printErr('CRITICAL ERROR: FS object not available in onRuntimeInitialized!');
-                alert('CRITICAL: Filesystem not available!');
-                return;
-            }
-            
-            Module.printErr('FS object acquired, proceeding with filesystem setup...');
-            try {
-                // IMPORTANT: Change working directory to /userdata
-                // With RUN_IN_PLACE=TRUE, Luanti uses cwd as the user data directory
-                const userDataDir = '/userdata';
-                Module.printErr('Changing working directory to /userdata...');
-                try {
-                    FS.chdir(userDataDir);
-                    Module.printErr('Changed working directory to: ' + FS.cwd());
-                } catch (e) {
-                    Module.printErr('CRITICAL ERROR: Failed to chdir to ' + userDataDir + ': ' + e);
-                    alert('CRITICAL: Cannot change to /userdata directory!');
-                    throw e;
-                }
-                
-                Module.printErr('Preparing writable directories (will set permissions next)...');
-                Module.printErr('Current directory: ' + FS.cwd());
-                Module.printErr('Root contents: ' + JSON.stringify(FS.readdir('/')));
-                
-                Module.printErr('Setting permissions on writable directories...');
-                const writableDirs = [
-                    '/userdata',
-                    '/userdata/games',
-                    '/userdata/cache',
-                    '/userdata/cache/cdb',
-                    '/userdata/mods',
-                    '/userdata/client',
-                    '/userdata/client/serverlist'
-                ];
-                
-                writableDirs.forEach(function(dir) {
-                    try {
-                        // First create if doesn't exist
-                        try {
-                            FS.mkdir(dir);
-                            Module.printErr('  Created: ' + dir);
-                        } catch (mkdirErr) {
-                            // Already exists, that's OK
-                        }
-                        
-                        // Now set permissions to rwx (0o777)
-                        FS.chmod(dir, 0o777);
-                        Module.printErr('  chmod 0o777: ' + dir);
-                    } catch (e) {
-                        Module.printErr('  ERROR setting permissions on ' + dir + ': ' + e);
-                    }
-                });
-            } catch (e) {
-                Module.printErr('CRITICAL ERROR: Failed to set up filesystem: ' + e);
-                alert('CRITICAL: Filesystem setup failed!\n\n' + e);
-                throw e;
-            }
-            
-            Module.printErr('===== onRuntimeInitialized complete! =====');
-            
-            // Signal that preloading is complete - show the Run button
+
+            // NOTE: /userdata is mounted from OPFS inside main() (see
+            // luanti/src/main.cpp). The host JS must NOT create or chdir to
+            // /userdata here — that would populate it in MEMFS and block the
+            // OPFS mount with EEXIST. All required subdirectories (worlds,
+            // games, mods, cache, cache/cdb, client, client/serverlist,
+            // __kaesual) are created by the JS-side ensureOpfsReady() in
+            // OPFS before main() is called, so they're visible immediately
+            // after the mount.
+
             LuantiStateObject.setReady();
         },
         onAbort: function(what) {

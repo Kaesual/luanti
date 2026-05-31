@@ -173,14 +173,17 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DEMSCRIPTEN_SDL2_MAIN_LOOP")
 
 # These flags should ONLY be applied to the final executable, not CMake tests
 set(EMSCRIPTEN_FINAL_EXE_FLAGS
-    # Preload game data (can't be used during CMake tests)
-    # With WASMFS=1, we preload directly to /userdata where Luanti expects them
-    "--preload-file=${CMAKE_SOURCE_DIR}/builtin@/userdata/builtin"
-    "--preload-file=${CMAKE_SOURCE_DIR}/textures@/userdata/textures"
-    "--preload-file=${CMAKE_SOURCE_DIR}/fonts@/userdata/fonts"
-    "--preload-file=${CMAKE_SOURCE_DIR}/client@/userdata/client"
+    # Preload read-only bundled assets to /share/* (the share path). User
+    # data (/userdata) is mounted from OPFS at startup; preloading into it
+    # would block the mount because the dir would already exist and be
+    # populated. The host (luanti-init.js) sets MINETEST_SHARE_PATH=/share
+    # so Luanti's porting code knows to look here for assets.
+    "--preload-file=${CMAKE_SOURCE_DIR}/builtin@/share/builtin"
+    "--preload-file=${CMAKE_SOURCE_DIR}/textures@/share/textures"
+    "--preload-file=${CMAKE_SOURCE_DIR}/fonts@/share/fonts"
+    "--preload-file=${CMAKE_SOURCE_DIR}/client@/share/client"
     # Disable copying devtest game by default.
-    # "--preload-file=${CMAKE_SOURCE_DIR}/games@/userdata/games"
+    # "--preload-file=${CMAKE_SOURCE_DIR}/games@/share/games"
     
     # JavaScript/WASM settings
     "-sEXPORTED_RUNTIME_METHODS=['callMain','ccall','cwrap','FS','ENV','stringToNewUTF8','PThread','abort']"

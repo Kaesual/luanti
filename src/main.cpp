@@ -148,14 +148,14 @@ int main(int argc, char *argv[])
 	if (!emscripten_is_main_browser_thread()) {
 		backend_t opfs_backend = wasmfs_create_opfs_backend();
 		fprintf(stderr, "[OPFS] OPFS backend created successfully\n");
-		int err = wasmfs_create_directory("/userdata/worlds", 0777, opfs_backend);
+		int err = wasmfs_create_directory("/userdata", 0777, opfs_backend);
 		if (err != 0) {
-			fprintf(stderr, "[OPFS] ERROR: Failed to mount OPFS at /userdata/worlds: %d (errno=%d)\n", err, errno);
-			fprintf(stderr, "[OPFS] World saves will NOT be persistent.\n");
+			fprintf(stderr, "[OPFS] ERROR: Failed to mount OPFS at /userdata: %d (errno=%d)\n", err, errno);
+			fprintf(stderr, "[OPFS] User data (worlds, mods, games, cache) will NOT be persistent.\n");
 		}
 		else {
-			fprintf(stderr, "[OPFS] OPFS mounted at /userdata/worlds\n");
-    		fprintf(stderr, "[OPFS] World saves will persist across browser sessions!\n");
+			fprintf(stderr, "[OPFS] OPFS mounted at /userdata\n");
+    		fprintf(stderr, "[OPFS] Worlds, mods, games and cache will persist across browser sessions!\n");
 		}
 	}
 #endif
