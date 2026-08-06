@@ -77,6 +77,21 @@ function createLuantiModuleConfiguration() {
         }
     };
 
+    // Launch arguments can carry a server password (--password). Anything that
+    // logs argv must go through this, or the secret ends up in every user's
+    // devtools console.
+    const SECRET_ARGS = ['--password'];
+    function redactArgs(args) {
+        if (!Array.isArray(args)) return args;
+        const out = args.slice();
+        for (let i = 0; i < out.length; i++) {
+            if (SECRET_ARGS.includes(out[i]) && i + 1 < out.length) {
+                out[i + 1] = '<redacted>';
+            }
+        }
+        return out;
+    }
+
     const Module = {
         // Preload everything but don't call main() until user clicks Run
         noInitialRun: true,
@@ -197,7 +212,7 @@ function createLuantiModuleConfiguration() {
 
     // Log that Module is configured
     console.log('***** MODULE CONFIGURED *****');
-    console.log('Module.arguments:', Module.arguments);
+    console.log('Module.arguments:', redactArgs(Module.arguments));
 
     // Debounce to avoid rapid resizes
     let resizeScheduled = false;
@@ -264,7 +279,16 @@ function createLuantiModuleConfiguration() {
         onProgressChangeListeners: new Set(),
         onAbortListeners: new Set(),
 
-        run: function() {
+        /**
+         * Start the game.
+         *
+         * @param {string[]} [args] argv for main(). Omit to boot into Luanti's
+         *   main menu (the default). Pass e.g.
+         *   ['--address', 'f::1', '--port', '30000',
+         *    '--name', 'Char', '--password', '...', '--go']
+         *   to connect straight to a server without showing the menu.
+         */
+        run: function(args) {
             if (this.isRunning) {
                 console.log('Luanti is already running');
                 return;
@@ -274,12 +298,13 @@ function createLuantiModuleConfiguration() {
                 return;
             }
             this.isRunning = true;
-            
-            console.log('Starting Luanti main()...');
+
+            const argv = Array.isArray(args) ? args : Module.arguments;
+            console.log('Starting Luanti main() with:', redactArgs(argv));
             // Call main() - this starts the actual game
             try {
                 if (typeof Module.callMain === 'function') {
-                    Module.callMain(Module.arguments);
+                    Module.callMain(argv);
                 } else {
                     throw new Error('Neither callMain nor _main available - rebuild with callMain in EXPORTED_RUNTIME_METHODS');
                 }
