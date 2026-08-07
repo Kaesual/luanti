@@ -278,6 +278,7 @@ function createLuantiModuleConfiguration() {
         loadingProgress: 0,
         onProgressChangeListeners: new Set(),
         onAbortListeners: new Set(),
+        onJoinResultListeners: new Set(),
 
         /**
          * Start the game.
@@ -349,7 +350,42 @@ function createLuantiModuleConfiguration() {
         removeProgressChangeListener: function(listener) {
             this.onProgressChangeListeners.delete(listener);
         },
+
+        /**
+         * The engine finished the login handshake with a server.
+         *
+         * @param {{accepted: boolean, denyCode: number|null, reason: string}} result
+         *   `accepted` is a successful join; otherwise `denyCode` is Luanti's
+         *   AccessDeniedCode (null when the server sent none) and `reason` is
+         *   the server's human-readable text.
+         */
+        joinResultOccurred: function(result) {
+            console.log('Luanti join result:', result);
+            this.onJoinResultListeners.forEach(listener => {
+                try {
+                    listener(result);
+                } catch (err) {
+                    console.error('Join result listener failed:', err);
+                }
+            });
+        },
+
+        addJoinResultListener: function(listener) {
+            this.onJoinResultListeners.add(listener);
+        },
+
+        removeJoinResultListener: function(listener) {
+            this.onJoinResultListeners.delete(listener);
+        },
     };
+
+    // Where the engine's MAIN_THREAD_ASYNC_EM_ASM callback lands
+    // (src/network/clientpackethandler.cpp). It runs in the page's global
+    // scope, not in this closure, so the bridge has to be a global.
+    const joinResultBridge = function(result) {
+        LuantiStateObject.joinResultOccurred(result);
+    };
+    self._luantiOnJoinResult = joinResultBridge;
 
     const cleanUp = function() {
         window.removeEventListener('keydown', preventKeyDefault, true);
@@ -361,6 +397,10 @@ function createLuantiModuleConfiguration() {
         window.removeEventListener('orientationchange', scheduleResize);
         document.removeEventListener('fullscreenchange', scheduleResize);
         document.removeEventListener('paste', pasteHandler);
+        // Only if a later instance has not already replaced it.
+        if (self._luantiOnJoinResult === joinResultBridge) {
+            delete self._luantiOnJoinResult;
+        }
         Module.printErr('***** CLEANUP COMPLETE *****');
     };
 

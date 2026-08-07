@@ -37,6 +37,58 @@
 #include <memory>
 #include <sstream>
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#include <cstdlib>
+#include <cstring>
+
+/*
+	Report the outcome of the login handshake to the hosting page.
+
+	The web client can be launched straight into a server with --name/--password
+	(see web/luanti-init.js). kaesual.com uses that to create a character: the
+	name is new, and Luanti registers unknown players on first join, so the only
+	witness of whether the game server accepted the name is this client. The two
+	packets that end the handshake - TOCLIENT_AUTH_ACCEPT and
+	TOCLIENT_ACCESS_DENIED - therefore hand their result to JS.
+
+	main() runs on a pthread (-sPROXY_TO_PTHREAD) and every pthread has its own
+	JS scope, while the page's callback exists on the browser's main thread only,
+	hence the MAIN_THREAD_ variant. It is the asynchronous one so the connection
+	thread never blocks on the browser's event loop; the price is that `reason`
+	has to be handed over as a heap copy that the JS side frees, since the
+	std::string is long gone by the time the callback runs.
+
+	deny_code is the AccessDeniedCode, or -1 when the server did not send one.
+*/
+static void reportJoinResultToJS(bool accepted, int deny_code, const std::string &reason)
+{
+	const size_t size = reason.size() + 1;
+	char *reason_copy = (char *)malloc(size);
+	if (!reason_copy)
+		return;
+	memcpy(reason_copy, reason.c_str(), size);
+
+	MAIN_THREAD_ASYNC_EM_ASM({
+		try {
+			if (typeof self._luantiOnJoinResult === 'function') {
+				self._luantiOnJoinResult({
+					accepted: !!$0,
+					denyCode: $1 < 0 ? null : $1,
+					reason: UTF8ToString($2),
+				});
+			}
+		} catch (e) {
+			console.error('[luanti] join result callback failed:', e);
+		} finally {
+			_free($2);
+		}
+	}, accepted ? 1 : 0, deny_code, reason_copy);
+}
+#else
+static inline void reportJoinResultToJS(bool, int, const std::string &) {}
+#endif
+
 const char *accessDeniedStrings[SERVER_ACCESSDENIED_MAX] = {
 	N_("Invalid password"),
 	N_("Your client sent something the server didn't expect.  Try reconnecting or updating your client."),
@@ -163,6 +215,10 @@ void Client::handleCommand_AuthAccept(NetworkPacket* pkt)
 		remote.print(actionstream);
 		actionstream << ")" << std::endl;
 	}
+
+	// The server accepted our name and password; if the name was new it has
+	// just been registered.
+	reportJoinResultToJS(true, -1, "");
 }
 
 void Client::handleCommand_AcceptSudoMode(NetworkPacket* pkt)
@@ -204,11 +260,14 @@ void Client::handleCommand_AccessDenied(NetworkPacket* pkt)
 			*pkt >> wide_reason;
 			m_access_denied_reason = wide_to_utf8(wide_reason);
 		}
+		reportJoinResultToJS(false, -1, m_access_denied_reason);
 		return;
 	}
 
-	if (pkt->getSize() < 1)
+	if (pkt->getSize() < 1) {
+		reportJoinResultToJS(false, -1, m_access_denied_reason);
 		return;
+	}
 
 	u8 denyCode;
 	u8 reconnect = 0; // default of 'm_access_denied_reconnect'
@@ -240,6 +299,8 @@ void Client::handleCommand_AccessDenied(NetworkPacket* pkt)
 	} else {
 		m_access_denied_reconnect = reconnect & 1;
 	}
+
+	reportJoinResultToJS(false, denyCode, m_access_denied_reason);
 }
 
 void Client::handleCommand_RemoveNode(NetworkPacket* pkt)

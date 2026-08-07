@@ -186,7 +186,10 @@ set(EMSCRIPTEN_FINAL_EXE_FLAGS
     # "--preload-file=${CMAKE_SOURCE_DIR}/games@/share/games"
     
     # JavaScript/WASM settings
-    "-sEXPORTED_RUNTIME_METHODS=['callMain','ccall','cwrap','FS','ENV','stringToNewUTF8','PThread','abort']"
+    # UTF8ToString is read by the MAIN_THREAD_ASYNC_EM_ASM block in
+    # src/network/clientpackethandler.cpp; EM_ASM bodies are not scanned for
+    # runtime dependencies, so it has to be kept explicitly.
+    "-sEXPORTED_RUNTIME_METHODS=['callMain','ccall','cwrap','FS','ENV','stringToNewUTF8','UTF8ToString','PThread','abort']"
     "-sEXPORTED_FUNCTIONS=['_main','_SDL_SetClipboardText','_free']"
     "-sMODULARIZE=1"
     "-sEXIT_RUNTIME=1"
