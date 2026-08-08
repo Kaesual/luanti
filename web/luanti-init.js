@@ -268,12 +268,21 @@ function createLuantiModuleConfiguration() {
     // Luanti control object
     let __isReadyResolve = null;
     let __isReadyReject = null;
+    const isReadyPromise = new Promise(function(resolve, reject) {
+        __isReadyResolve = resolve;
+        __isReadyReject = reject;
+    });
+    // The launcher only starts awaiting isReady once the module instance is
+    // there, but an abort can happen before that — onAbort fires while the
+    // runtime is still coming up. Without a handler attached from the start,
+    // rejecting it then would surface as an unhandled rejection (and be caught
+    // by our own unhandledrejection handler below, which would be nonsense).
+    // Attaching one here does not stop a later `await` from seeing the
+    // rejection; it only stops the browser from calling it unhandled.
+    isReadyPromise.catch(function() {});
     const LuantiStateObject = {
         __ready: false,
-        isReady: new Promise(function(resolve, reject) {
-            __isReadyResolve = resolve;
-            __isReadyReject = reject;
-        }),
+        isReady: isReadyPromise,
         isRunning: false,
         loadingProgress: 0,
         onProgressChangeListeners: new Set(),
@@ -332,6 +341,13 @@ function createLuantiModuleConfiguration() {
 
         abortOccurred: function(error) {
             console.error('Luanti abort:', error);
+            // An abort before setReady() means the engine is never coming up,
+            // so isReady must fail rather than hang: the launcher awaits it and
+            // the abort listeners below are registered only *after* that await
+            // returns, so they cannot be the ones to report a failure to boot.
+            // After setReady() this is a no-op — a settled promise ignores it —
+            // and the listeners handle a crash in a running game as before.
+            __isReadyReject(new Error(error || 'The engine aborted'));
             this.onAbortListeners.forEach(listener => listener(error));
         },
 
@@ -413,11 +429,28 @@ function createLuantiModuleConfiguration() {
 
 // Preload Luanti after luanti.js loads (downloads WASM + assets, but doesn't run main())
 window.createLuantiInstance = async () => {
+    // How long to wait for luanti.js to publish LuantiModule. That script is a
+    // plain <script> tag the launcher appends, so this waits for one HTTP fetch
+    // of a few hundred KB and its top-level evaluation — no WASM download
+    // happens yet, LuantiModule() below is what starts that. A minute is
+    // therefore generous for what it covers, and the bound is the point:
+    // without it a 404 or a dead network on luanti.js is indistinguishable from
+    // a slow load, and the page sits at "Loading…" forever with no error and no
+    // way back except a reload. Kept inside this function rather than at file
+    // scope: this file is a classic script, and a top-level `const` would make
+    // a second load of it a SyntaxError.
+    const LUANTI_MODULE_TIMEOUT_MS = 60000;
+    const deadline = Date.now() + LUANTI_MODULE_TIMEOUT_MS;
     while (typeof window.LuantiModule === 'undefined') {
+        if (Date.now() >= deadline) {
+            throw new Error(
+                'Timed out after ' + Math.round(LUANTI_MODULE_TIMEOUT_MS / 1000) +
+                's waiting for the engine script (/static/luanti/luanti.js) to load');
+        }
         console.log('Waiting for LuantiModule to load...');
         await new Promise(resolve => setTimeout(resolve, 100));
     }
-    
+
     try {
         const { Module, LuantiStateObject, cleanUp } = createLuantiModuleConfiguration();
         const instancePromise = LuantiModule(Module);
