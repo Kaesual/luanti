@@ -178,8 +178,8 @@ function createLuantiModuleConfiguration() {
             // /userdata here — that would populate it in MEMFS and block the
             // OPFS mount with EEXIST. All required subdirectories (worlds,
             // games, mods, cache, cache/cdb, client, client/serverlist,
-            // __kaesual) are created by the JS-side ensureOpfsReady() in
-            // OPFS before main() is called, so they're visible immediately
+            // __kaesual) are created in OPFS by the app's storage owner before
+            // main() is called, so they're visible immediately
             // after the mount.
 
             LuantiStateObject.setReady();
@@ -301,11 +301,15 @@ function createLuantiModuleConfiguration() {
         run: function(args) {
             if (this.isRunning) {
                 console.log('Luanti is already running');
-                return;
+                return false;
             }
             if (!this.__ready) {
                 console.log('Luanti not yet preloaded, please wait...');
-                return;
+                return false;
+            }
+            if (typeof Module.callMain !== 'function') {
+                console.error('callMain is unavailable - rebuild with callMain in EXPORTED_RUNTIME_METHODS');
+                return false;
             }
             this.isRunning = true;
 
@@ -313,14 +317,20 @@ function createLuantiModuleConfiguration() {
             console.log('Starting Luanti main() with:', redactArgs(argv));
             // Call main() - this starts the actual game
             try {
-                if (typeof Module.callMain === 'function') {
-                    Module.callMain(argv);
-                } else {
-                    throw new Error('Neither callMain nor _main available - rebuild with callMain in EXPORTED_RUNTIME_METHODS');
+                const returned = Module.callMain(argv);
+                if (returned != null && typeof returned.then === 'function') {
+                    const state = this;
+                    void Promise.resolve(returned).catch(function(err) {
+                        console.error('Luanti main() rejected:', err);
+                        state.isRunning = false;
+                        state.abortOccurred('MAIN REJECTED: ' + (err || 'Unknown error'));
+                    });
                 }
+                return true;
             } catch (err) {
                 console.error('Failed to start Luanti:', err);
                 this.isRunning = false;
+                return false;
             }
         },
 
@@ -341,6 +351,7 @@ function createLuantiModuleConfiguration() {
 
         abortOccurred: function(error) {
             console.error('Luanti abort:', error);
+            this.isRunning = false;
             // An abort before setReady() means the engine is never coming up,
             // so isReady must fail rather than hang: the launcher awaits it and
             // the abort listeners below are registered only *after* that await
