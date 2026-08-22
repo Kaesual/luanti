@@ -104,17 +104,21 @@ The build uses several advanced Emscripten features for maximum performance:
 - Full ES3 support is enabled
 - Hardware acceleration is strongly recommended
 
-### Preloaded Assets
+### Filesystem layout
 
-The following directories are preloaded into the virtual filesystem at `/userdata`:
-- `/userdata/builtin` - Core Lua scripts
-- `/userdata/games` - Game definitions (including devtest)
-- `/userdata/textures` - Base texture pack
-- `/userdata/fonts` - Font files
-- `/userdata/client` - Client configuration and shaders
-- `/userdata/worlds` - World data
+Read-only bundled assets are preloaded into the virtual filesystem below
+`/share`:
 
-With `WASMFS=1`, files are preloaded directly to their target locations (no symlinks needed).
+- `/share/builtin` - Core Lua scripts
+- `/share/textures` - Base textures
+- `/share/fonts` - Bundled fonts
+- `/share/client` - Client assets and shaders
+
+The browser mounts the Origin Private File System at `/userdata` when Luanti
+starts. `LUANTI_USER_PATH` points to `/userdata/luanti`, so writable games,
+worlds, configuration, caches, client data and screenshots persist below that
+directory. With `WASMFS=1`, bundled files are preloaded directly below `/share`
+without symlinks; they are not mixed into the writable OPFS tree.
 
 ## Known Limitations
 
@@ -318,4 +322,3 @@ When contributing to the web build:
 ## License
 
 Same as Luanti: LGPL 2.1+ (see LICENSE.txt in project root)
-
