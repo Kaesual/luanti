@@ -151,7 +151,9 @@ set(EMSCRIPTEN_COMMON_FLAGS
     # Asyncify (JSPI) and Threading settings
     "-sJSPI=1"
     "-sASYNCIFY_STACK_SIZE=8MB"
-    "-sJSPI_EXPORTS=['_main']"
+    # WasmFS' OPFS proxy enters wasm from JS through its heartbeat queue and
+    # PThread mailbox; both entries can reach async OPFS imports.
+    "-sJSPI_EXPORTS=['main','emscripten_proxy_execute_queue','_emscripten_check_mailbox']"
     "-sJSPI_IMPORTS=['emscripten_sleep','emscripten_yield','emscripten_main_loop_helper','emscripten_asm_const_int','emscripten_asm_const_double','emscripten_asm_const_void','emscripten_scan_registers','getaddrinfo','emscripten_getaddrinfo']"
     "-sALLOW_BLOCKING_ON_MAIN_THREAD=0"
     "-pthread"
@@ -267,4 +269,3 @@ elseif(CMAKE_BUILD_TYPE STREQUAL "Debug")
     message(STATUS "  Optimizations: None (-O0 + debug symbols)")
     message(STATUS "  Target: Debugging")
 endif()
-

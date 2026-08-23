@@ -29,9 +29,10 @@ docker run --rm -p 8080:8080 luanti-web-server:latest
 ```
 
 `build-web/` is generated and ignored by Git. Do not commit its contents. A
-change limited to HTML or JavaScript assembly may only need
-`02-build-www.sh`, provided compiled output already exists; changes to C++, the
-toolchain or compile flags require `01-build-luanti.sh` first.
+change limited to `luanti-init.js` may only need `02-build-www.sh`, provided
+compiled output already exists. `shell.html`, `pre.js` and
+`socket-proxy-shared.js` are linker inputs; changes to them, C++, the toolchain
+or compile flags require `01-build-luanti.sh` first.
 
 ## Browser-build invariants
 
@@ -51,8 +52,8 @@ toolchain or compile flags require `01-build-luanti.sh` first.
 Validate in proportion to the change:
 
 - Run `bash -n web/*.sh` after editing shell scripts.
-- For assembly-only changes, run `./web/02-build-www.sh`, build and run the
-  serving image, and inspect the browser console.
+- For a `luanti-init.js`-only assembly change, run `./web/02-build-www.sh`,
+  build and run the serving image, and inspect the browser console.
 - For toolchain or compiled-code changes, run `./web/01-build-luanti.sh` with an
   appropriate build type, then assemble and serve the result.
 - Exercise the affected browser flow, including resize, input, persistence or

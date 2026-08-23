@@ -196,7 +196,8 @@ After rebuilding with these changes:
 Check the browser console for `__emscripten_receive_on_main_thread_js` in the stack trace. If you see it, it means GL operations are still being proxied to the main thread.
 
 **Causes:**
-1. **Old build artifacts** - Do a clean rebuild: `rm -rf build-web/* && emcmake cmake .. && emmake make`
+1. **Old build artifacts** - From the repository root, run the version-pinned
+   clean build: `./web/01-build-luanti.sh`, then `./web/02-build-www.sh`.
 2. **Missing flags** - Ensure both `-sOFFSCREEN_FRAMEBUFFER=0` and `-sGL_WORKAROUND_SAFARI_GETCONTEXT_BUG=0` are in your cmake file
 3. **Wrong Emscripten version** - OffscreenCanvas support improved significantly in Emscripten 3.1.8+. Update if needed.
 
@@ -204,13 +205,14 @@ Check the browser console for `__emscripten_receive_on_main_thread_js` in the st
 
 Verify the generated JavaScript doesn't proxy EGL:
 ```bash
-grep -c "__emscripten_receive_on_main_thread_js.*egl" build-web/bin/luanti.js
+perl -0777 -ne 'my $c = () = /function\s+_egl[a-zA-Z0-9_]+\([^)]*\)\s*\{\s*if\s*\(ENVIRONMENT_IS_PTHREAD\)[^;]+;/gs; print "$c\n"' build-web/output/luanti.js
 ```
-This should return 0. If it returns a number > 0, GL operations are still being proxied.
+This is the same active-guard matcher used by `fix-egl-proxy.sh` and should
+return 0 after that patch. If it returns a number greater than 0, EGL operations
+are still being proxied.
 
 ## References
 
 - [Emscripten Canvas API Documentation](https://emscripten.org/docs/api_reference/html5.h.html#c.emscripten_set_canvas_element_size)
 - [OffscreenCanvas MDN Documentation](https://developer.mozilla.org/en-US/docs/Web/API/OffscreenCanvas)
 - [Emscripten PROXY_TO_PTHREAD](https://emscripten.org/docs/porting/pthreads.html#additional-flags)
-

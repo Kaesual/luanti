@@ -7,6 +7,8 @@
 
 set -e
 
+BUILDER_IMAGE="luanti-web-builder:emscripten-6.0.8"
+
 # Colors
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -56,18 +58,17 @@ if ! command -v docker &> /dev/null; then
     exit 1
 fi
 
-echo -e "${YELLOW}Checking for custom build image...${NC}"
+echo -e "${YELLOW}Building Emscripten 6.0.8 build image...${NC}"
+docker build -f "${SCRIPT_DIR}/Dockerfile" -t "$BUILDER_IMAGE" "$PROJECT_ROOT"
+echo ""
 
-# Check if our custom image exists, if not build it
-if ! docker image inspect luanti-web-builder:latest >/dev/null 2>&1; then
-    echo -e "${YELLOW}Building custom Docker image with ninja (one-time setup)...${NC}"
-    docker build -f "${SCRIPT_DIR}/Dockerfile" -t luanti-web-builder:latest "$PROJECT_ROOT"
-    echo ""
-fi
-
-echo -e "${YELLOW}Building Luanti with Emscripten 5.0.0...${NC}"
+echo -e "${YELLOW}Building Luanti with Emscripten 6.0.8...${NC}"
 echo "This may take a while on first build."
 echo ""
+
+# Every invocation is a full compiler build. Remove all host-side output so
+# objects and generated files from a different SDK can never be reused.
+rm -rf "$PROJECT_ROOT/build-web"
 
 # Run the build in container
 # Only mount project root - build-web will be inside it
@@ -76,20 +77,19 @@ docker run \
     -v "${PROJECT_ROOT}:/src" \
     -u $(id -u):$(id -g) \
     -e BUILD_TYPE="${BUILD_TYPE}" \
-    luanti-web-builder:latest \
+    "$BUILDER_IMAGE" \
     bash -c "
         set -e
         echo '=== Build Environment ==='
-        emcc --version | head -n1
+        EMCC_VERSION=\"\$(emcc --version | head -n1)\"
+        echo \"\$EMCC_VERSION\"
+        if ! printf '%s\\n' \"\$EMCC_VERSION\" | grep -Eq '\\) 6\\.0\\.8( |\\()'; then
+            echo \"Error: expected Emscripten 6.0.8, got: \$EMCC_VERSION\" >&2
+            exit 1
+        fi
         echo \"Ninja: \$(ninja --version)\"
         echo \"Build type: \${BUILD_TYPE}\"
         echo ''
-        
-        # Clean previous build if it exists (to avoid cache issues)
-        if [ -f /src/build-web/CMakeCache.txt ]; then
-            echo 'Cleaning previous build...'
-            rm -f /src/build-web/CMakeCache.txt
-        fi
         
         # Build in /src/build-web (which is mounted from host)
         mkdir -p /src/build-web
@@ -112,6 +112,23 @@ docker run \
         echo ''
         echo '=== Building (this will take a while) ==='
         cmake --build . --parallel \$(nproc)
+
+        echo ''
+        echo '=== Generated luanti artifact inventory ==='
+        find bin -maxdepth 1 -type f -name 'luanti*' -printf '%f\\n' | sort > /tmp/luanti-inventory
+        cat /tmp/luanti-inventory
+        printf '%s\\n' luanti.data luanti.html luanti.js luanti.wasm | sort > /tmp/luanti-required
+        printf '%s\\n' luanti.data luanti.html luanti.js luanti.wasm luanti.wasm.map | sort > /tmp/luanti-allowed
+        if ! comm -23 /tmp/luanti-required /tmp/luanti-inventory | grep -q .; then :; else
+            echo 'Error: required generated luanti artifact is missing:' >&2
+            comm -23 /tmp/luanti-required /tmp/luanti-inventory >&2
+            exit 1
+        fi
+        if comm -13 /tmp/luanti-allowed /tmp/luanti-inventory | grep -q .; then
+            echo 'Error: unclassified generated luanti artifact(s):' >&2
+            comm -13 /tmp/luanti-allowed /tmp/luanti-inventory >&2
+            exit 1
+        fi
         
         echo ''
         echo '=== Preparing output ==='
@@ -147,6 +164,7 @@ docker run \
         echo ''
         echo '=== Applying EGL Workaround ==='
         bash /src/web/fix-egl-proxy.sh
+        node --check /src/build-web/output/luanti.js
     "
 
 if [ $? -eq 0 ]; then
@@ -192,4 +210,3 @@ else
     echo "Check the error messages above."
     exit 1
 fi
-

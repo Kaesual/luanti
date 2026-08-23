@@ -56,7 +56,16 @@ fi
 # Comment out the if (ENVIRONMENT_IS_PTHREAD) block in all _egl functions.
 perl -i -0777 -pe 's/(function\s+_egl[a-zA-Z0-9_]+\([^)]*\)\s*\{\s*)(if\s*\(ENVIRONMENT_IS_PTHREAD\)[^;]+;)/$1\/*$2*\//gs' "$LUANTI_JS"
 
-echo "  Patched $EGL_PATCH_COUNT EGL function(s)"
+EGL_OLD_COUNT=$(perl -0777 -ne 'my $c = () = /(function\s+_egl[a-zA-Z0-9_]+\([^)]*\)\s*\{\s*if\s*\(ENVIRONMENT_IS_PTHREAD\)[^;]+;)/gs; print $c;' "$LUANTI_JS")
+EGL_PATCHED_COUNT=$(perl -0777 -ne 'my $c = () = /(function\s+_egl[a-zA-Z0-9_]+\([^)]*\)\s*\{\s*\/\*if\s*\(ENVIRONMENT_IS_PTHREAD\)[^;]+;\*\/)/gs; print $c;' "$LUANTI_JS")
+[ -z "$EGL_OLD_COUNT" ] && EGL_OLD_COUNT=0
+[ -z "$EGL_PATCHED_COUNT" ] && EGL_PATCHED_COUNT=0
+if [ "$EGL_OLD_COUNT" -ne 0 ] || [ "$EGL_PATCHED_COUNT" -ne "$EGL_PATCH_COUNT" ]; then
+    echo "  Error: EGL proxy post-state invalid: old=$EGL_OLD_COUNT patched=$EGL_PATCHED_COUNT expected=$EGL_PATCH_COUNT" >&2
+    exit 1
+fi
+
+echo "  Patched $EGL_PATCH_COUNT EGL function(s) (old-after=0 patched-after=$EGL_PATCHED_COUNT)"
 
 # ---------------------------------------------------------------------------
 # Patch 2: preserveDrawingBuffer injection
@@ -83,12 +92,14 @@ sed -i "s|$PRESERVE_TARGET|$PRESERVE_REPLACEMENT|" "$LUANTI_JS"
 
 # Verify the patch actually landed (defensive — should never fail given the
 # count check above passed).
-if ! grep -Fq "preserveDrawingBuffer:true" "$LUANTI_JS"; then
-    echo "  Error: preserveDrawingBuffer:true not present after sed; patch failed." >&2
+PRESERVE_OLD_COUNT=$(grep -Fo "$PRESERVE_TARGET" "$LUANTI_JS" | wc -l)
+PRESERVE_NEW_COUNT=$(grep -Fo "$PRESERVE_REPLACEMENT" "$LUANTI_JS" | wc -l)
+if [ "$PRESERVE_OLD_COUNT" -ne 0 ] || [ "$PRESERVE_NEW_COUNT" -ne 1 ]; then
+    echo "  Error: preserveDrawingBuffer post-state invalid: old=$PRESERVE_OLD_COUNT new=$PRESERVE_NEW_COUNT" >&2
     exit 1
 fi
 
-echo "  Patched EGL.contextAttributes to include preserveDrawingBuffer:true"
+echo "  Patched EGL.contextAttributes (old-after=0 new-after=1)"
 
 echo "Post-build patches applied successfully!"
 echo "Backup saved to $LUANTI_JS.backup"

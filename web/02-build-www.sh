@@ -2,8 +2,9 @@
 set -e
 
 # Script: 02-build-www.sh
-# Purpose: Fast rebuild of web assets (JS/HTML only, no C++ recompilation)
-# Usage: Run this after making changes to web/*.js or web/*.html
+# Purpose: Reassemble an existing linked output and refresh luanti-init.js.
+# Usage: Run this alone only after changing luanti-init.js. shell.html, pre.js,
+# and socket-proxy-shared.js are linker inputs and require 01 first.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
@@ -52,9 +53,9 @@ echo ""
 echo "Output files in: $WWW_DIR"
 echo ""
 echo "To test, run:"
-echo "  ./web/serve-with-docker.sh"
+echo "  ./web/03-build-docker.sh"
+echo "  docker run --rm -p 8080:8080 luanti-web-server:latest"
 echo ""
 echo "Or serve directly:"
 echo "  cd $WWW_DIR"
 echo "  python3 -m http.server 8080"
-

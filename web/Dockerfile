@@ -1,12 +1,12 @@
 # Dockerfile for Luanti Web Builder
 # This extends the official Emscripten image with ninja-build for faster compilation
 #
-# Build this image once:
-#   docker build -f web/Dockerfile -t luanti-web-builder .
+# Build this image:
+#   docker build -f web/Dockerfile -t luanti-web-builder:emscripten-6.0.8 .
 #
-# Then use with build-with-docker.sh script
+# Then use through web/01-build-luanti.sh
 
-FROM emscripten/emsdk:5.0.0
+FROM emscripten/emsdk:6.0.8@sha256:f174124ff798a3ead1abef247d9a849c270b642d552fea500a42565ff210f765
 
 LABEL description="Luanti web build environment with Emscripten and Ninja"
 LABEL maintainer="Jan Hangebrauck"
@@ -21,7 +21,7 @@ RUN apt-get update && \
 
 # Build zstd for Emscripten with pthread support (not available as a built-in port)
 # Install to /usr/local so it persists even if Emscripten cache is cleared
-# Using -fwasm-exceptions (JS-based) for JSPI compatibility
+# Using native WebAssembly exceptions for JSPI compatibility
 RUN wget -q https://github.com/facebook/zstd/releases/download/v1.5.6/zstd-1.5.6.tar.gz && \
     tar -xzf zstd-1.5.6.tar.gz && \
     cd zstd-1.5.6/lib && \
@@ -85,12 +85,13 @@ RUN emcc --clear-cache && \
     echo "Emscripten cache cleared"
 
 # Pre-build all Emscripten ports - LTO variant (for Release builds)
-# Using -fwasm-exceptions (JS-based) and -sSUPPORT_LONGJMP=wasm for JSPI compatibility
+# Using native WebAssembly exceptions and wasm longjmp for JSPI compatibility
 RUN echo 'int main(){}' > /tmp/prebuild.c && \
     emcc /tmp/prebuild.c -o /tmp/prebuild.html \
         -fwasm-exceptions \
         -pthread \
         -flto \
+        -sDEFAULT_TO_CXX=1 \
         -sUSE_SDL=2 \
         -sUSE_ZLIB=1 \
         -sUSE_LIBPNG=1 \
@@ -108,6 +109,7 @@ RUN echo 'int main(){}' > /tmp/prebuild.c && \
         -fwasm-exceptions \
         -pthread \
         -flto=thin \
+        -sDEFAULT_TO_CXX=1 \
         -sUSE_SDL=2 \
         -sUSE_ZLIB=1 \
         -sUSE_LIBPNG=1 \
@@ -124,6 +126,7 @@ RUN echo 'int main(){}' > /tmp/prebuild.c && \
     emcc /tmp/prebuild.c -o /tmp/prebuild.html \
         -fwasm-exceptions \
         -pthread \
+        -sDEFAULT_TO_CXX=1 \
         -sUSE_SDL=2 \
         -sUSE_ZLIB=1 \
         -sUSE_LIBPNG=1 \
@@ -142,5 +145,4 @@ RUN chmod -R 777 /emsdk/upstream/emscripten/cache
 WORKDIR /src
 
 # This image is meant to be used with volume mounts
-# See web/build-with-docker.sh for usage
-
+# See web/01-build-luanti.sh for usage

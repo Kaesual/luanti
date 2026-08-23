@@ -13,17 +13,16 @@ The web build allows Luanti to run directly in modern web browsers without insta
 
 ## Directory Contents
 
-- `Dockerfile` - Docker image with Emscripten 5.0.0 + ninja
+- `Dockerfile` - Docker image with pinned Emscripten 6.0.8 + ninja
 - `Dockerfile.serve` - nginx server for serving the web build
 - `01-build-luanti.sh` - Compiles Luanti to WebAssembly using Docker
 - `02-build-www.sh` - Prepares the final web directory with assets and JS
-- `serve-with-docker.sh` - Serve the build with proper WASM headers
+- `03-build-docker.sh` - Build the nginx image that serves the bundle with the required browser headers
 - `emscripten-toolchain.cmake` - CMake toolchain configuration for Emscripten
 - `nginx.conf` - nginx configuration with CORS headers for WASM
 - `shell.html` - HTML template for the game interface
 - `luanti-init.js` - Main JavaScript entry point and initialization
 - `pre.js` - JavaScript pre-initialization code (feature detection, logging)
-- `post.js` - JavaScript post-initialization helpers
 - `README.md` - This file
 - `OFFSCREENCANVAS-FIX.md` - Documentation for OffscreenCanvas support
 
@@ -39,48 +38,48 @@ The web build allows Luanti to run directly in modern web browsers without insta
 ./web/02-build-www.sh
 
 # 3. Serve with proper WASM headers
-./web/serve-with-docker.sh
+./web/03-build-docker.sh
+docker run --rm -p 8080:8080 luanti-web-server:latest
 
 # 4. Open browser to http://localhost:8080
 ```
 
-That's it! The Docker image is built automatically on first run.
+The versioned Emscripten builder image is rebuilt on every full compile. Docker
+reuses unchanged layers, while the build verifies that the container actually
+runs Emscripten 6.0.8 before configuring CMake.
 
 ### What These Scripts Do
 
 **`01-build-luanti.sh`**:
-- Builds `luanti-web-builder` Docker image
+- Builds `luanti-web-builder:emscripten-6.0.8` from the pinned SDK digest
 - Compiles Luanti to WebAssembly
 - Outputs to `build-web/output/`: `luanti.js`, `luanti.wasm`, `luanti.data`
 
 **`02-build-www.sh`**:
 - Creates `build-web/www/` directory
 - Copies built artifacts from `output/`
-- Copies `luanti-init.js` and other runtime dependencies
-- This is where you run after modifying only JavaScript/HTML files
+- Copies the current `luanti-init.js`
+- May run alone after changing `luanti-init.js`; `shell.html`, `pre.js` and
+  `socket-proxy-shared.js` are consumed by the linker and require step 01 first
 
-**`serve-with-docker.sh`**:
+**`03-build-docker.sh`**:
 - Builds `luanti-web-server` Docker image (nginx)
 - Serves files from `build-web/www/` with proper CORS headers
 - No caching during development (always serves fresh files)
 
 ## Browser Requirements
 
-Minimum browser versions with WebGL 2.0 support:
-- Chrome 56+
-- Firefox 51+
-- Safari 15+
-- Edge 79+
-
-Mobile browsers are supported but performance may vary.
+The client requires WebAssembly, WebGL 2, OffscreenCanvas, JSPI, and
+`SharedArrayBuffer` in a cross-origin-isolated page. These requirements are the
+practical browser boundary; WebGL 2 support alone is not sufficient.
 
 ## Configuration
 
 ### Memory Settings
 
 The default configuration allocates:
-- Initial memory: 256 MB
-- Maximum memory: 4 GB (with growth enabled)
+- Initial memory: 2 GB
+- Maximum memory: 4 GB
 - Stack size: 10 MB
 - Pthread stack size: 2 MB
 
@@ -90,7 +89,7 @@ These can be adjusted in `emscripten-toolchain.cmake` via `-sINITIAL_MEMORY`, `-
 
 The build uses several advanced Emscripten features for maximum performance:
 
-- **JSPI (JavaScript Promise Integration)**: Uses `-sASYNCIFY=2` to allow synchronous C++ code to yield to the browser without the overhead of traditional Asyncify.
+- **JSPI (JavaScript Promise Integration)**: Uses `-sJSPI=1` with explicit imports and exports so synchronous-looking C++ code can yield to the browser.
 - **Multi-threading**: Enabled via `-pthread`. A pool of worker threads is pre-allocated for the server, network, and emerge threads.
 - **Proxy to Pthread**: Enabled via `-sPROXY_TO_PTHREAD=1`. This moves the main Luanti execution off the main browser thread to a Web Worker, preventing UI freezes during heavy operations.
 - **OffscreenCanvas**: Enabled via `-sOFFSCREENCANVAS_SUPPORT=1`. Allows rendering from the worker thread.
@@ -148,10 +147,8 @@ The build mode is controlled by passing the build type to `./web/01-build-luanti
 **Target:** Development and debugging.
 
 **Features:**
-- Full C++ symbols with source maps (`-g -gsource-map`)
-- Maximum assertions (`-sASSERTIONS=2`)
-- Stack overflow detection (`-sSTACK_OVERFLOW_CHECK=2`)
-- No optimizations (`-O0`)
+- Debug CMake build mode with no optimization (`-O0`)
+- Runtime assertions and Emscripten stack-overflow checks remain explicitly disabled by the shared toolchain contract
 
 **Usage:**
 ```bash
@@ -182,15 +179,18 @@ rm -rf build-web/
 ./web/02-build-www.sh
 ```
 
-**Incremental C++ rebuild**:
+**Repeat clean C++ rebuild**:
 ```bash
 ./web/01-build-luanti.sh
 ```
 
-**Fast web-only rebuild** (after changing `luanti-init.js` or `shell.html`):
+**Fast assembly-only rebuild** (after changing only `luanti-init.js`):
 ```bash
 ./web/02-build-www.sh
 ```
+
+Changes to `shell.html`, `pre.js` or `socket-proxy-shared.js` require the full
+step 01 link before step 02.
 
 ### Testing
 
@@ -198,7 +198,8 @@ rm -rf build-web/
 ```bash
 ./web/01-build-luanti.sh
 ./web/02-build-www.sh
-./web/serve-with-docker.sh
+./web/03-build-docker.sh
+docker run --rm -p 8080:8080 luanti-web-server:latest
 ```
 
 2. Open http://localhost:8080 in browser
@@ -213,7 +214,7 @@ rm -rf build-web/
 ### Production Checklist
 
 - [ ] Build with Release configuration
-- [ ] Optimize WASM size (`-Os` or `-Oz`)
+- [ ] Build with the reviewed optimization and runtime contract
 - [ ] Enable compression (gzip/brotli) on web server
 - [ ] Configure proper MIME types for `.wasm` files
 - [ ] Set appropriate cache headers for static assets
