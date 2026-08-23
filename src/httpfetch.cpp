@@ -5,7 +5,7 @@
 #include "httpfetch.h"
 #include "porting.h" // for sleep_ms(), get_sysinfo(), secure_rand_fill_buf()
 #include <cstring>
-#include <list>
+#include <deque>
 #include <unordered_map>
 #include <mutex>
 #include "threading/event.h"
@@ -131,6 +131,18 @@ bool httpfetch_async_get(u64 caller, HTTPFetchResult &fetch_result)
 	return true;
 }
 
+static bool string_safe_for_httpfetch(std::string_view s, const char *kind)
+{
+	// NUL isn't unsafe but will truncate the string, so warn too.
+	if (s.find_first_of("\r\n") != std::string::npos || s.find('\0') != std::string::npos) {
+		warningstream << "httpfetch: can't use " << kind << " \"";
+		safe_print_string(warningstream, s);
+		warningstream << "\" because it contains invalid characters" << std::endl;
+		return false;
+	}
+	return true;
+}
+
 #if USE_CURL
 #include <curl/curl.h>
 
@@ -141,6 +153,7 @@ bool httpfetch_async_get(u64 caller, HTTPFetchResult &fetch_result)
 static size_t httpfetch_writefunction(
 		char *ptr, size_t size, size_t nmemb, void *userdata)
 {
+	assert(userdata);
 	auto *dest = reinterpret_cast<std::string*>(userdata);
 	size_t count = size * nmemb;
 	dest->append(ptr, count);
@@ -152,6 +165,19 @@ static size_t httpfetch_discardfunction(
 {
 	return size * nmemb;
 }
+
+static int httpfetch_debugfunction(
+		CURL *handle, curl_infotype type, char *data, size_t size, void *clientp)
+{
+	(void)handle;
+	(void)clientp;
+	if (type == CURLINFO_TEXT) {
+		std::string_view text(data, size); // it's not null-terminated
+		tracestream << text;
+	}
+	return 0;
+}
+
 
 class CurlHandlePool
 {
@@ -236,6 +262,11 @@ HTTPFetchOngoing::HTTPFetchOngoing(const HTTPFetchRequest &request_,
 	curl_easy_setopt(curl, CURLOPT_IPRESOLVE,
 		 enable_ipv6 ? CURL_IPRESOLVE_WHATEVER : CURL_IPRESOLVE_V4);
 
+	if (tracestream) {
+		curl_easy_setopt(curl, CURLOPT_DEBUGFUNCTION, httpfetch_debugfunction);
+		curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
+	}
+
 	// Restrict protocols so that curl vulnerabilities in
 	// other protocols don't affect us.
 #if LIBCURL_VERSION_NUM >= 0x075500
@@ -262,8 +293,10 @@ HTTPFetchOngoing::HTTPFetchOngoing(const HTTPFetchRequest &request_,
 	curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT_MS,
 			request.connect_timeout);
 
-	curl_easy_setopt(curl, CURLOPT_USERAGENT,
-		request.useragent.empty() ? nullptr : request.useragent.c_str());
+	if (string_safe_for_httpfetch(request.useragent, "user agent")) {
+		curl_easy_setopt(curl, CURLOPT_USERAGENT,
+			request.useragent.empty() ? nullptr : request.useragent.c_str());
+	}
 
 	// Set up a write callback that writes to the
 	// result struct, unless the data is to be discarded
@@ -337,7 +370,9 @@ HTTPFetchOngoing::HTTPFetchOngoing(const HTTPFetchRequest &request_,
 
 	// Set additional HTTP headers
 	for (const auto &s : request.extra_headers) {
-		http_header = curl_slist_append(http_header, s.c_str());
+		if (string_safe_for_httpfetch(s, "request header")) {
+			http_header = curl_slist_append(http_header, s.c_str());
+		}
 	}
 	curl_easy_setopt(curl, CURLOPT_HTTPHEADER, http_header);
 
@@ -462,7 +497,7 @@ protected:
 
 	// Variables exclusively used within thread
 	std::vector<std::unique_ptr<HTTPFetchOngoing>> m_all_ongoing;
-	std::list<HTTPFetchRequest> m_queued_fetches;
+	std::deque<HTTPFetchRequest> m_queued_fetches;
 
 public:
 	CurlFetchThread(int parallel_limit) :
@@ -946,8 +981,10 @@ void httpfetch_async(const HTTPFetchRequest &fetch_request)
 		ctx->header_storage.emplace_back("application/x-www-form-urlencoded");
 	}
 	for (const auto &h : fetch_request.extra_headers) {
+		if (!string_safe_for_httpfetch(h, "request header"))
+			continue;
 		auto colon = h.find(':');
-		if (colon == std::string::npos)
+		if (colon == std::string::npos || colon == 0)
 			continue;
 		std::string value = h.substr(colon + 1);
 		size_t start = value.find_first_not_of(" \t");

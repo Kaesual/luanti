@@ -288,7 +288,7 @@ int main(int argc, char *argv[])
 #endif
 	}
 
-	GameStartData game_params;
+	GameParams game_params;
 #if !CHECK_CLIENT_BUILD()
 	porting::attachOrCreateConsole();
 	game_params.is_dedicated_server = true;
@@ -742,7 +742,9 @@ static bool use_debugger(int argc, char *argv[])
 			continue;
 		new_args.push_back(argv[i]);
 	}
+#if CHECK_CLIENT_BUILD()
 	new_args.push_back("--console");
+#endif
 	new_args.push_back(nullptr);
 
 #ifdef _WIN32
