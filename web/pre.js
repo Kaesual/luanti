@@ -167,7 +167,7 @@ if (isMainThread) {
         }, 5000);
     }
 
-    // Canvas is recreated on every game launch (see GameContext.runLuanti),
+    // Canvas is recreated on every launch by the browser's Luanti adapter,
     // so all canvas-related event handling must look the element up at event
     // time rather than capturing it once. Listeners live on window/document
     // and check the current #canvas dynamically.

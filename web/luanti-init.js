@@ -184,6 +184,9 @@ function createLuantiModuleConfiguration() {
 
             LuantiStateObject.setReady();
         },
+        onExit: function(status) {
+            LuantiStateObject.settledOccurred({ kind: 'exit', status: status });
+        },
         onAbort: function(what) {
             console.error('***** ABORT CALLED *****');
             console.error('Abort reason:', what);
@@ -287,7 +290,10 @@ function createLuantiModuleConfiguration() {
         loadingProgress: 0,
         onProgressChangeListeners: new Set(),
         onAbortListeners: new Set(),
+        onSettledListeners: new Set(),
         onJoinResultListeners: new Set(),
+        __settled: false,
+        __settledResult: null,
 
         /**
          * Start the game.
@@ -299,6 +305,10 @@ function createLuantiModuleConfiguration() {
          *   to connect straight to a server without showing the menu.
          */
         run: function(args) {
+            if (this.__settled) {
+                console.log('Luanti runtime has already settled');
+                return false;
+            }
             if (this.isRunning) {
                 console.log('Luanti is already running');
                 return false;
@@ -320,9 +330,12 @@ function createLuantiModuleConfiguration() {
                 const returned = Module.callMain(argv);
                 if (returned != null && typeof returned.then === 'function') {
                     const state = this;
+                    // The generated JSPI wrapper is async even though its
+                    // proxied pthread main keeps running after this Promise
+                    // fulfils. Fulfilment is therefore acceptance only, never
+                    // engine settlement; onExit/onAbort own the lifetime.
                     void Promise.resolve(returned).catch(function(err) {
                         console.error('Luanti main() rejected:', err);
-                        state.isRunning = false;
                         state.abortOccurred('MAIN REJECTED: ' + (err || 'Unknown error'));
                     });
                 }
@@ -360,6 +373,36 @@ function createLuantiModuleConfiguration() {
             // and the listeners handle a crash in a running game as before.
             __isReadyReject(new Error(error || 'The engine aborted'));
             this.onAbortListeners.forEach(listener => listener(error));
+            this.settledOccurred({ kind: 'abort', error: String(error || 'The engine aborted') });
+        },
+
+        settledOccurred: function(result) {
+            if (this.__settled) return;
+            this.__settled = true;
+            this.__settledResult = result;
+            this.isRunning = false;
+            this.onSettledListeners.forEach(listener => {
+                try {
+                    listener(result);
+                } catch (err) {
+                    console.error('Settled listener failed:', err);
+                }
+            });
+        },
+
+        addSettledListener: function(listener) {
+            this.onSettledListeners.add(listener);
+            if (this.__settled) {
+                try {
+                    listener(this.__settledResult);
+                } catch (err) {
+                    console.error('Settled listener failed:', err);
+                }
+            }
+        },
+
+        removeSettledListener: function(listener) {
+            this.onSettledListeners.delete(listener);
         },
 
         addAbortListener: function(listener) {
